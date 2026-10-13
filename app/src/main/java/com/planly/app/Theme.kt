@@ -8,14 +8,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 data class PlanlyColors(val background: Color, val surface: Color, val mint: Color, val text: Color,
-    val secondaryText: Color, val green: Color, val onGreen: Color, val outline: Color, val highlight: Color)
-val LightPlanly = PlanlyColors(Color(0xFFFFFDF8), Color(0xFFFFFDF8), Color(0xFFEAF3EC),
-    Color(0xFF20342B), Color(0xFF465A4E), Color(0xFF285D46), Color(0xFFFFFDF8), Color(0xFFD0DFD4), Color(0xFFFFFFFF))
-val DarkPlanly = PlanlyColors(Color(0xFF17231D), Color(0xFF1F2E25), Color(0xFF2A3B30),
-    Color(0xFFEDF5EC), Color(0xFFB7CABC), Color(0xFFB0D4BC), Color(0xFF1B3022), Color(0xFF455B4B), Color(0xFF374D3D))
+    val secondaryText: Color, val green: Color, val onGreen: Color, val outline: Color, val highlight: Color,
+    val lavender: Color, val butter: Color, val peach: Color, val sky: Color)
+val LightPlanly = PlanlyColors(Color(0xFFFFFBF5), Color(0xFFFFFFFF), Color(0xFFE3F2EC),
+    Color(0xFF183539), Color(0xFF476368), Color(0xFF126968), Color(0xFFFFFFFF), Color(0xFFD6E2DD), Color(0xFFFFFFFF),
+    Color(0xFFEFE8FB), Color(0xFFFFF0BE), Color(0xFFFFE1D5), Color(0xFFDBEFF9))
+val DarkPlanly = PlanlyColors(Color(0xFF14272A), Color(0xFF1C3436), Color(0xFF294C46),
+    Color(0xFFECF5F0), Color(0xFFBACBC6), Color(0xFF9AD9CC), Color(0xFF172F30), Color(0xFF3E5557), Color(0xFF274043),
+    Color(0xFF3D3554), Color(0xFF4A432D), Color(0xFF4C3733), Color(0xFF284451))
 val LocalPlanly = staticCompositionLocalOf { LightPlanly }
 private tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this
@@ -45,5 +50,6 @@ private tailrec fun Context.activity(): Activity? = when (this) {
         surfaceContainer = p.surface, surfaceContainerLow = p.surface, surfaceContainerHigh = p.mint,
         surfaceContainerHighest = p.mint, surfaceContainerLowest = p.background,
         surfaceBright = p.surface, surfaceDim = p.background, outline = p.outline, outlineVariant = p.outline)
-    CompositionLocalProvider(LocalPlanly provides p) { MaterialTheme(colorScheme = colors, content = content) }
+    val shapes = Shapes(small = RoundedCornerShape(14.dp), medium = RoundedCornerShape(22.dp), large = RoundedCornerShape(28.dp))
+    CompositionLocalProvider(LocalPlanly provides p) { MaterialTheme(colorScheme = colors, shapes = shapes, content = content) }
 }

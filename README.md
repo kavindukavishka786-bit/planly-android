@@ -1,6 +1,10 @@
 # PLANLY Android
 
-A native Kotlin / Jetpack Compose task planner with a warm mint interface inspired by the supplied UI reference. Light mode uses dark forest text and explicit content colors; dark mode is optional, with a System choice. Glass styling uses restrained gradients, borders and depth rather than a costly refraction shader.
+A native Kotlin / Jetpack Compose task planner with a warm cream, teal and pastel interface inspired by the supplied wellness UI reference. Light mode uses dark text and explicit content colors; dark mode is optional, with a System choice. Glass styling uses restrained gradients, borders and depth rather than a costly refraction shader.
+
+Version 0.2.0 adds a lightweight vector garden welcome card, pastel week tiles, Focus and AI quick-access cards, task search, compact navigation, animated completion colors, list placement, daily progress and eased page/detail transitions. Existing offline tasks and settings retain their storage format. Text contrast across the pastel surfaces is at least 5.22:1 in light mode and 5.61:1 in dark mode.
+
+Commits containing `[ui-preview]` also capture real Android emulator screenshots in the **PLANLY-UI-preview** workflow artifact. The screenshots use a fresh install without personal content. You can request them again using **Run workflow**.
 
 ## First version
 

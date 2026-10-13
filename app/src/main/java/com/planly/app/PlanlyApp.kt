@@ -15,12 +15,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
@@ -32,11 +39,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
@@ -121,35 +130,52 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             }
         }) {
             Scaffold(containerColor = p.background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
-                TopAppBar(title = { Text(if (task != null) "Task" else page, color = p.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold) },
+                TopAppBar(title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (task == null && page == "Today") { PlanlyMark(); Spacer(Modifier.width(9.dp)) }
+                        Text(if (task != null) "Task" else if (page == "Today") "Planly" else page, color = p.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = p.background, navigationIconContentColor = p.text, actionIconContentColor = p.text),
                     navigationIcon = { IconButton(onClick = { if (detail != null) detail = null else scope.launch { drawer.open() } }) {
                         Icon(if (detail != null) Icons.AutoMirrored.Outlined.ArrowBack else Icons.Outlined.Menu, if (detail != null) "Back" else "Open menu") } },
                     actions = {
-                        IconButton(onClick = { detail = null; page = "Settings" }) { Icon(Icons.Outlined.NotificationsNone, "Notification settings") }
+                        IconButton(onClick = { detail = null; page = "Settings" }, modifier = Modifier.semantics { contentDescription = "Open settings" }) {
+                            if (page == "Today") Box(Modifier.size(34.dp).background(p.peach, CircleShape), contentAlignment = Alignment.Center) {
+                                Text(data.preferences.name.firstOrNull()?.uppercase() ?: "P", color = p.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            } else Icon(Icons.Outlined.NotificationsNone, "Notification settings")
+                        }
                         IconButton(onClick = { editId = task?.id; if (page == "Today") day = LocalDate.now().toString(); editorOpen = true }) {
                             Icon(if (task != null) Icons.Outlined.Edit else Icons.Outlined.Add, if (task != null) "Edit task" else "Add task") }
                     })
             }, bottomBar = {
                 GlassPanel(glass = data.preferences.glass, modifier = Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                         pages.forEach { name ->
-                            NavigationBarItem(selected = page == name && task == null, onClick = { detail = null; page = name },
-                                icon = { Icon(pageIcon(name), null, Modifier.size(21.dp)) }, label = { Text(name, fontSize = 11.sp) },
-                                colors = NavigationBarItemDefaults.colors(selectedIconColor = p.green, selectedTextColor = p.green,
-                                    unselectedIconColor = p.secondaryText, unselectedTextColor = p.secondaryText, indicatorColor = p.mint))
+                            val selected = page == name && task == null
+                            val tint by animateColorAsState(if (selected) p.green else p.secondaryText, tween(220), label = "Tab color")
+                            val fill by animateColorAsState(if (selected) p.mint else Color.Transparent, tween(220), label = "Tab highlight")
+                            Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).selectable(selected, role = Role.Tab, onClick = { detail = null; page = name })
+                                .heightIn(min = 56.dp).padding(vertical = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(Modifier.size(34.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+                                    Icon(pageIcon(name), null, Modifier.size(22.dp), tint = tint)
+                                }
+                                Text(name, color = tint, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                            }
                         }
                     }
                 }
             }) { inset ->
                 Box(Modifier.fillMaxSize().padding(inset)) {
-                    if (task != null) TaskDetail(task, onToggle = { store.toggle(task.id) }, onDelete = { deleteId = task.id }, onFocus = {
-                        store.resetFocus(task.title); detail = null; page = "Focus"
-                    }) else AnimatedContent(targetState = page, transitionSpec = {
-                        (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 12 }) togetherWith fadeOut(tween(100))
+                    AnimatedContent(targetState = page to task?.id, transitionSpec = {
+                        (fadeIn(tween(240)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 20 }) togetherWith fadeOut(tween(160))
                     }, label = "Navigation") { screen ->
-                        when (screen) {
-                            "Today" -> TodayScreen(data, store, onTask = { detail = it }, onAdd = { editId = null; day = LocalDate.now().toString(); editorOpen = true }, onCalendar = { page = "Calendar" }, onAI = { page = "AI planner" })
+                        val shownTask = data.tasks.find { it.id == screen.second }
+                        if (shownTask != null) TaskDetail(shownTask, onToggle = { store.toggle(shownTask.id) }, onDelete = { deleteId = shownTask.id }, onFocus = {
+                            store.resetFocus(shownTask.title); detail = null; page = "Focus"
+                        }) else when (screen.first) {
+                            "Today" -> TodayScreen(data, store, onTask = { detail = it }, onAdd = { editId = null; day = LocalDate.now().toString(); editorOpen = true },
+                                onCalendar = { date -> day = date.toString(); page = "Calendar" }, onAI = { page = "AI planner" }, onFocus = { page = "Focus" })
                             "Calendar" -> CalendarScreen(data, LocalDate.parse(day), onDay = { day = it.toString() }, onTask = { detail = it }, onAdd = { editId = null; editorOpen = true })
                             "Tasks" -> TasksScreen(data, onTask = { detail = it }, onAdd = { editId = null; editorOpen = true })
                             "Settings" -> SettingsScreen(data.preferences, permissionsVersion,
@@ -187,13 +213,15 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         if (action != null) TextButton(onClick = onAction) { Text(action, color = LocalPlanly.current.green, fontSize = 12.sp) }
     }
 }
-@Composable private fun TaskRow(task: Task, onOpen: () -> Unit, onToggle: (() -> Unit)? = null) {
+@Composable private fun TaskRow(task: Task, onOpen: () -> Unit, onToggle: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     val p = LocalPlanly.current
-    Surface(shape = RoundedCornerShape(17.dp), border = BorderStroke(1.dp, p.outline), color = p.surface, modifier = Modifier.fillMaxWidth()) {
+    val fill by animateColorAsState(if (task.done) p.mint else p.surface, tween(240), label = "Task completion")
+    Surface(shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, p.outline.copy(alpha = .65f)), color = fill, modifier = modifier.fillMaxWidth().animateContentSize(tween(240))) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (onToggle != null) Checkbox(checked = task.done, onCheckedChange = { onToggle() }, colors = CheckboxDefaults.colors(checkedColor = p.green, uncheckedColor = p.secondaryText, checkmarkColor = p.onGreen))
             Column(Modifier.weight(1f).clickable(onClick = onOpen).padding(8.dp)) {
-                Text(task.title, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(task.title, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None)
                 Spacer(Modifier.height(5.dp))
                 Text("${task.timeLabel()} · ${task.minutes} min · ${task.project}", color = p.secondaryText, fontSize = 11.sp)
                 if (task.done) Text("Completed", color = p.green, fontSize = 11.sp)
@@ -211,43 +239,64 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         Button(onClick = onAdd, modifier = Modifier.padding(top = 18.dp)) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(6.dp)); Text("Add your first task") }
     }
 }
-@Composable private fun TodayScreen(data: AppData, store: AppStore, onTask: (String) -> Unit, onAdd: () -> Unit, onCalendar: () -> Unit, onAI: () -> Unit) {
+@Composable private fun TodayScreen(data: AppData, store: AppStore, onTask: (String) -> Unit, onAdd: () -> Unit,
+    onCalendar: (LocalDate) -> Unit, onAI: () -> Unit, onFocus: () -> Unit) {
     val p = LocalPlanly.current
-    val tasks = data.tasks.filter { TaskRules.dayOf(it) == LocalDate.now() }.sortedBy { it.dueAt }
+    val today = LocalDate.now()
+    val tasks = remember(data.tasks, today) { data.tasks.filter { TaskRules.dayOf(it) == today }.sortedBy { it.dueAt } }
     val done = tasks.count { it.done }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp, 12.dp, 24.dp, 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val progress by animateFloatAsState(if (tasks.isEmpty()) 0f else done.toFloat() / tasks.size, tween(400), label = "Daily progress")
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 4.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WbSunny, null, tint = p.green, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp)); Text(LocalDate.now().format(dayFormat), color = p.secondaryText, fontSize = 12.sp) }
-            val greeting = when (LocalTime.now().hour) { in 0..11 -> "Good morning"; in 12..17 -> "Good afternoon"; else -> "Good evening" }
-            Text(if (data.preferences.name.isBlank()) "$greeting." else "$greeting,\n${data.preferences.name}.", fontSize = 30.sp, lineHeight = 35.sp, color = p.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
-            Text("Let's make a little room for your goals.", color = p.secondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            Text("A calmer day, one step at a time.", color = p.secondaryText, fontSize = 13.sp, modifier = Modifier.padding(bottom = 16.dp))
+            val greeting = when (LocalTime.now().hour) { in 0..11 -> "Good morning,"; in 12..17 -> "Good afternoon,"; else -> "Good evening," }
+            WelcomeGarden(greeting, data.preferences.name, onAdd)
         }
         item {
-            Surface(color = p.green, contentColor = p.onGreen, shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Column(Modifier.padding(22.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("YOUR DAILY PLAN", color = p.onGreen, fontSize = 11.sp, letterSpacing = 1.sp); Icon(Icons.Outlined.Spa, null, tint = p.onGreen) }
-                    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
-                        Text("$done", fontSize = 40.sp, color = p.onGreen, fontWeight = FontWeight.Medium)
-                        Text(" / ${tasks.size}", fontSize = 23.sp, color = p.onGreen, modifier = Modifier.padding(bottom = 5.dp))
-                        Text(" tasks done", color = p.onGreen, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp, bottom = 8.dp))
+            SectionTitle("Your week", "Calendar", { onCalendar(today) })
+            val start = today.minusDays((today.dayOfWeek.value - 1).toLong())
+            val tones = listOf(p.mint, p.sky, p.butter, p.peach, p.lavender, p.mint, p.sky)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(7) { i ->
+                    val date = start.plusDays(i.toLong()); val selected = date == today
+                    Surface(onClick = { onCalendar(date) }, shape = RoundedCornerShape(18.dp), color = tones[i],
+                        border = if (selected) BorderStroke(1.5.dp, p.green) else null, modifier = Modifier.width(48.dp)) {
+                        Column(Modifier.padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(date.dayOfMonth.toString(), fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = p.text)
+                            Text(date.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }, color = p.secondaryText, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                        }
                     }
-                    LinearProgressIndicator(progress = { if (tasks.isEmpty()) 0f else done.toFloat() / tasks.size }, color = p.onGreen, trackColor = p.onGreen.copy(alpha = .2f), modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${tasks.filterNot { it.done }.sumOf { it.minutes }} min remaining", color = p.onGreen, fontSize = 11.sp); Text("At your pace", color = p.onGreen, fontSize = 11.sp) }
                 }
             }
         }
-        item { SectionTitle("Your next steps", "Calendar", onCalendar) }
-        if (tasks.isEmpty()) item { EmptyTasks(onAdd) }
-        items(tasks, key = { it.id }) { t -> TaskRow(t, { onTask(t.id) }, { store.toggle(t.id) }) }
         item {
-            GlassPanel(data.preferences.glass, Modifier.fillMaxWidth().clickable(onClick = onAI)) {
+            SectionTitle("Quick access")
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                QuickAccessCard("Gentle focus", "One thing at a time", Icons.Outlined.Spa, p.lavender, Modifier.weight(1f), onFocus)
+                QuickAccessCard("AI planner", "Big goals, small steps", Icons.Outlined.AutoAwesome, p.mint, Modifier.weight(1f), onAI)
+            }
+        }
+        item {
+            Surface(color = p.surface, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, p.outline.copy(alpha = .65f))) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.AutoAwesome, null, tint = p.green); Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) { Text("A little help from AI", color = p.green, fontSize = 14.sp, fontWeight = FontWeight.Medium); Text("Turn a big goal into small steps", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)) }
-                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, tint = p.green, modifier = Modifier.size(18.dp))
+                    Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize(), color = p.green,
+                            trackColor = p.mint, strokeWidth = 4.dp)
+                        Icon(Icons.Outlined.Check, null, tint = p.green, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("$done of ${tasks.size} steps complete", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("${tasks.filterNot { it.done }.sumOf { it.minutes }} min remaining · At your pace", color = p.secondaryText,
+                            fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+                    }
                 }
             }
         }
+        item { SectionTitle("Today's small steps", "Add", onAdd) }
+        if (tasks.isEmpty()) item { EmptyTasks(onAdd) }
+        items(tasks, key = { it.id }) { t -> TaskRow(t, { onTask(t.id) }, { store.toggle(t.id) }, Modifier.animateItem()) }
     }
 }
 @Composable private fun CalendarScreen(data: AppData, day: LocalDate, onDay: (LocalDate) -> Unit, onTask: (String) -> Unit, onAdd: () -> Unit) {
@@ -295,13 +344,43 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     }
 }
 @Composable private fun TasksScreen(data: AppData, onTask: (String) -> Unit, onAdd: () -> Unit) {
+    val p = LocalPlanly.current
     var filter by rememberSaveable { mutableStateOf("Active") }
-    val tasks = data.tasks.filter { filter == "All" || (filter == "Active" && !it.done) || (filter == "Done" && it.done) }.sortedBy { it.dueAt }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp, 12.dp, 24.dp, 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Active", "Done", "All").forEach { name -> FilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) }) } } }
-        if (tasks.isEmpty()) item { EmptyTasks(onAdd) }
-        items(tasks, key = { it.id }) { t -> Column {
-            Text(TaskRules.dayOf(t).format(dayFormat), color = LocalPlanly.current.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
+    var query by rememberSaveable { mutableStateOf("") }
+    val tasks = remember(data.tasks, filter, query) {
+        data.tasks.filter { (filter == "All" || (filter == "Active" && !it.done) || (filter == "Done" && it.done)) &&
+            (query.isBlank() || it.title.contains(query.trim(), ignoreCase = true) || it.project.contains(query.trim(), ignoreCase = true)) }.sortedBy { it.dueAt }
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            OutlinedTextField(query, { query = it.take(100) }, placeholder = { Text("Search tasks or projects", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth())
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Active", "Done", "All").forEachIndexed { i, name ->
+                val selected = filter == name
+                FilterChip(selected = selected, onClick = { filter = name }, label = { Text(name) },
+                    shape = RoundedCornerShape(20.dp), colors = FilterChipDefaults.filterChipColors(
+                        containerColor = listOf(p.mint, p.lavender, p.peach)[i], labelColor = p.text,
+                        selectedContainerColor = p.green, selectedLabelColor = p.onGreen))
+            } }
+        }
+        item {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))) {
+                CozyLandscape(Modifier.matchParentSize())
+                Column(Modifier.padding(22.dp)) {
+                    Text("Make room for\nwhat matters.", color = p.text, fontSize = 25.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold)
+                    Text("Your goals, at your pace.", color = p.secondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 24.dp))
+                    FilledTonalButton(onClick = onAdd) { Icon(Icons.Outlined.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("New task", fontSize = 12.sp) }
+                }
+            }
+        }
+        item { SectionTitle(if (query.isBlank()) "Your ${filter.lowercase()} tasks" else "Search results") }
+        if (tasks.isEmpty()) item {
+            if (query.isBlank()) EmptyTasks(onAdd) else Text("No matching tasks. Try another name or project.", color = p.secondaryText, fontSize = 14.sp, modifier = Modifier.padding(vertical = 24.dp))
+        }
+        items(tasks, key = { it.id }) { t -> Column(Modifier.animateItem()) {
+            Text(TaskRules.dayOf(t).format(dayFormat), color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
             TaskRow(t, { onTask(t.id) })
         } }
     }
@@ -343,7 +422,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     var reminder by rememberSaveable(original?.id) { mutableIntStateOf(original?.reminderMinutes ?: 10) }
     var error by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = LocalPlanly.current.surface) {
-        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).animateContentSize(tween(220)).padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(if (original == null) "A new small step" else "Edit task", color = LocalPlanly.current.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(title, { title = it.take(100) }, label = { Text("Task name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(notes, { notes = it.take(2000) }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4)
@@ -419,7 +498,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             else if (tokenProblem != null) onMessage(tokenProblem)
             else runCatching { secrets.save(token); onChange(prefs.copy(endpoint = endpoint.trim().trimEnd('/'))); onMessage("AI connection saved.") }.onFailure { onMessage("Could not save credentials. Please try again.") }
         }, modifier = Modifier.fillMaxWidth()) { Text("Save AI connection") }
-        Text("PLANLY 0.1.1 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
+        Text("PLANLY 0.2.0 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
     }
 }
 @Composable private fun SwitchLine(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
