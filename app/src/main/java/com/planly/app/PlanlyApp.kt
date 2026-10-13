@@ -96,6 +96,12 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     var permissionsVersion by remember { mutableIntStateOf(0) }
     var notificationPurpose by rememberSaveable { mutableStateOf("Tasks") }
     fun message(text: String) { scope.launch { snackbar.showSnackbar(text) } }
+    fun showIssue(text: String) { scope.launch {
+        if (snackbar.showSnackbar(text, actionLabel = "Fix issues", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) {
+            detail = null; page = "App Health"
+        }
+    } }
+    LaunchedEffect(Unit) { if (AppDiagnostics.last(context) != null) showIssue("An issue was recorded. Review App Health.") }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val prefs = store.state.value.preferences
         when (notificationPurpose) {
@@ -108,7 +114,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
-            permissionsVersion++; scope.launch(kotlinx.coroutines.Dispatchers.IO) { store.reschedule() }
+            permissionsVersion++; scope.launch(kotlinx.coroutines.Dispatchers.IO) { if (store.reschedule() > 0) showIssue("A reminder needs attention.") }
         } }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
@@ -209,7 +215,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                                     else store.preferences(data.preferences.copy(screenBreaks = enabled))
                                 }, onHealth = { page = "App Health" }, onMessage = ::message)
                             "Focus" -> FocusScreen(data, store)
-                            "AI planner" -> AIScreen(data.preferences, store, onSettings = { page = "Settings" }, onMessage = ::message)
+                            "AI planner" -> AIScreen(data.preferences, store, onSettings = { page = "Settings" }, onHealth = { page = "App Health" }, onMessage = ::message)
                             "Progress" -> ProgressScreen(data)
                             "App Health" -> AppHealthScreen(data.preferences, permissionsVersion, onNotifications = {
                                 notificationPurpose = "Health"
@@ -621,7 +627,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         }
     }
 }
-@Composable private fun AIScreen(prefs: Preferences, store: AppStore, onSettings: () -> Unit, onMessage: (String) -> Unit) {
+@Composable private fun AIScreen(prefs: Preferences, store: AppStore, onSettings: () -> Unit, onHealth: () -> Unit, onMessage: (String) -> Unit) {
     val context = LocalContext.current
     val p = LocalPlanly.current
     val scope = rememberCoroutineScope()
@@ -645,7 +651,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             Button(enabled = !loading && goal.trim().length >= 3, onClick = {
                 loading = true; error = null; steps = emptyList(); selected = emptySet()
                 scope.launch { try {
-                    steps = AiClient(context).generate(goal); selected = steps.indices.toSet()
+                    steps = AiClient(context).generate(goal); selected = steps.indices.toSet(); AppDiagnostics.clearIf(context, "AI_REQUEST_FAILED")
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     error = e.message ?: "Could not create a plan. Please try again."
@@ -653,7 +659,10 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                 }
                 finally { loading = false } }
             }, modifier = Modifier.fillMaxWidth()) { if (loading) { CircularProgressIndicator(Modifier.size(18.dp), color = p.onGreen, strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)) }; Text(if (loading) "Planning your next steps…" else "Create task plan") }
-            if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+            if (error != null) {
+                Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                OutlinedButton(onClick = onHealth, modifier = Modifier.fillMaxWidth()) { Text("Check and fix issues") }
+            }
             steps.forEachIndexed { i, step ->
                 Surface(color = p.mint, shape = RoundedCornerShape(16.dp)) { Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(i in selected, onCheckedChange = { selected = if (it) selected + i else selected - i })
