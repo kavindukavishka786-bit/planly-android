@@ -63,7 +63,8 @@ object ScreenBreaks {
                 .setContentTitle("Time for a screen break").setContentText("Look away, stretch, and take a short pause.")
                 .setContentIntent(open).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .addAction(0, "Turn off hourly reminders", pending(context, "BREAK_OFF")).build()
-            runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
+            try { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
+            catch (_: SecurityException) { /* Permission may be revoked between the check and delivery. */ }
         }
         prefs(context).edit().putLong("nextAt", now + BreakRules.HOUR).apply()
         sync(context, settings)

@@ -34,13 +34,13 @@ object Reminders {
     fun test(context: Context): Boolean {
         channels(context)
         if (!ready(context, CHANNEL)) return false
-        return runCatching {
+        return try {
             NotificationManagerCompat.from(context).notify("planly-test", 203,
                 NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle("PLANLY reminder test").setContentText("Your notification channel is working.")
                     .setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
             true
-        }.getOrDefault(false)
+        } catch (_: SecurityException) { false }
     }
     private fun pending(context: Context, id: String, action: String = "REMIND", flags: Int = PendingIntent.FLAG_UPDATE_CURRENT): PendingIntent? =
         PendingIntent.getBroadcast(context, 0, Intent(context, ReminderReceiver::class.java)
