@@ -24,7 +24,32 @@ test('unauthorized calls never reach Gemini', async t => {
 });
 test('unconfigured service fails closed', async t => {
   const base = await withServer(t, createHandler({}));
-  assert.equal((await request(base, { goal: 'Prepare presentation' })).status, 503);
+  const response = await request(base, { goal: 'Prepare presentation' });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'Set GEMINI_API_KEY in your server environment, then save and deploy.', code: 'AI_CONFIGURATION_INVALID' });
+  assert.deepEqual(await (await fetch(`${base}/health`)).json(), { status: 'ok', aiReady: false });
+});
+test('short and malformed server tokens explain setup failure without contacting Gemini or disclosing secrets', async t => {
+  for (const invalid of ['short-token', 'a'.repeat(31), 'a'.repeat(513), 'a'.repeat(32) + ' ', 'a'.repeat(32) + '\n', 'a'.repeat(32) + 'é']) {
+    let called = false;
+    const base = await withServer(t, createHandler({ token: invalid, apiKey: 'private-test-key' }, { fetchImpl: async () => { called = true; return successful(); } }));
+    const response = await request(base, { goal: 'Prepare presentation' });
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.code, 'AI_CONFIGURATION_INVALID');
+    assert.match(body.error, /APP_ACCESS_TOKEN.*32 to 512/);
+    assert.equal(JSON.stringify(body).includes('private-test-key'), false);
+    assert.equal(JSON.stringify(body).includes(invalid), false);
+    assert.equal(called, false);
+    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { status: 'ok', aiReady: false });
+  }
+});
+test('valid boundary-length tokens authenticate and health reports configuration readiness', async t => {
+  for (const valid of ['a'.repeat(32), 'b'.repeat(512)]) {
+    const base = await withServer(t, createHandler({ token: valid, apiKey: 'test-key' }, { fetchImpl: successful }));
+    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { status: 'ok', aiReady: true });
+    assert.equal((await request(base, { goal: 'Prepare presentation' }, valid)).status, 200);
+  }
 });
 test('sends only the requested goal, disables provider storage, validates result', async t => {
   const base = await withServer(t, createHandler({ token, apiKey: 'test-key' }, { fetchImpl: async (url, options) => {

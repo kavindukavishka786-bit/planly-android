@@ -23,16 +23,23 @@ const reply = (res, status, data) => {
     'X-Content-Type-Options': 'nosniff' });
   res.end(JSON.stringify(data));
 };
+export function configurationProblem(config) {
+  if (typeof config.apiKey !== 'string' || !config.apiKey.trim()) return 'Set GEMINI_API_KEY in your server environment, then save and deploy.';
+  if (typeof config.token !== 'string' || config.token.length < 32 || config.token.length > 512 || !/^[\x21-\x7e]+$/.test(config.token))
+    return 'Set APP_ACCESS_TOKEN to a random 32 to 512 character token without spaces, then save and deploy. Use the same token in PLANLY Settings.';
+  return null;
+}
 export function createHandler(config, { fetchImpl = fetch, now = Date.now } = {}) {
   const model = config.model || 'gemini-3.5-flash-lite';
   if (!/^gemini-[a-z0-9.-]+$/.test(model)) throw new Error('Invalid model name');
   const expected = hash(config.token || '');
+  const setupProblem = configurationProblem(config);
   const requests = new Map();
   let day = Math.floor(now() / 86_400_000), daily = 0, inFlight = 0;
   return async (req, res) => {
-    if (req.method === 'GET' && req.url === '/health') return reply(res, 200, { status: 'ok' });
+    if (req.method === 'GET' && req.url === '/health') return reply(res, 200, { status: 'ok', aiReady: setupProblem === null });
     if (req.method !== 'POST' || req.url !== '/api/plan') return reply(res, 404, { error: 'Not found' });
-    if (!config.apiKey || !config.token || config.token.length < 32) return reply(res, 503, { error: 'AI service is not configured' });
+    if (setupProblem) return reply(res, 503, { error: setupProblem, code: 'AI_CONFIGURATION_INVALID' });
     const provided = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
     if (!timingSafeEqual(hash(provided), expected)) return reply(res, 401, { error: 'Unauthorized' });
     if (!(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')) return reply(res, 415, { error: 'Use JSON' });

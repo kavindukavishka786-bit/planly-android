@@ -411,13 +411,15 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         SwitchLine("Gemini Flash-Lite", "Review suggestions before adding tasks", prefs.aiEnabled) { onChange(prefs.copy(aiEnabled = it)) }
         Text("Only the goal you enter is sent to your configured AI server. Tasks remain on this device.", color = p.secondaryText, fontSize = 12.sp, lineHeight = 20.sp)
         OutlinedTextField(endpoint, { endpoint = it.take(500) }, label = { Text("AI server URL (HTTPS)") }, placeholder = { Text("https://your-server.example") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(token, { token = it.take(512) }, label = { Text("Server access token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(token, { token = it.take(512) }, label = { Text("Server access token") }, supportingText = { Text("32 to 512 characters. Must match your server access token.") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
             val uri = runCatching { java.net.URI(endpoint.trim()) }.getOrNull()
+            val tokenProblem = if (token.isNotEmpty() || prefs.aiEnabled) AiRules.validateToken(token) else null
             if (endpoint.isNotBlank() && (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null)) onMessage("Enter an HTTPS server URL without credentials or query parameters.")
-            else runCatching { secrets.save(token.trim()); onChange(prefs.copy(endpoint = endpoint.trim().trimEnd('/'))); onMessage("AI connection saved.") }.onFailure { onMessage("Could not save credentials. Please try again.") }
+            else if (tokenProblem != null) onMessage(tokenProblem)
+            else runCatching { secrets.save(token); onChange(prefs.copy(endpoint = endpoint.trim().trimEnd('/'))); onMessage("AI connection saved.") }.onFailure { onMessage("Could not save credentials. Please try again.") }
         }, modifier = Modifier.fillMaxWidth()) { Text("Save AI connection") }
-        Text("PLANLY 0.1 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
+        Text("PLANLY 0.1.1 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
     }
 }
 @Composable private fun SwitchLine(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {

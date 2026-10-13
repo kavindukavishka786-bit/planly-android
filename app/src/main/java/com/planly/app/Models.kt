@@ -26,6 +26,14 @@ data class AppData(val tasks: List<Task> = emptyList(), val preferences: Prefere
     val focusEnd: Long = 0, val focusRemaining: Long = 25 * 60, val focusTask: String = "")
 data class AiStep(val title: String, val minutes: Int, val notes: String)
 
+object AiRules {
+    fun validateToken(token: String): String? = when {
+        token.length !in 32..512 -> "Use a random server access token of 32 to 512 characters. Set the same token on your server."
+        token.any { it.code !in 33..126 } -> "Use an access token without spaces or line breaks."
+        else -> null
+    }
+}
+
 object TaskRules {
     fun validate(title: String, minutes: Int): String? = when {
         title.trim().isEmpty() -> "Give your task a name."

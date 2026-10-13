@@ -41,6 +41,14 @@ The Android app never contains the Gemini API key. `backend/` is a small Node 22
 5. Deploy the service behind HTTPS on your chosen Node host. The app rejects plain HTTP and redirects when sending credentials.
 6. In **PLANLY → Settings**, turn on AI assistance, enter the HTTPS server origin and its access token, and save.
 
+### Fix an AI setup error
+
+If the server access token is shorter than 32 characters, the server refuses AI requests. Use a random 32 to 512 character token containing only printable ASCII without spaces. Set the exact same token in `APP_ACCESS_TOKEN` on the server and in PLANLY Settings. The app checks these requirements before saving or making an AI request.
+
+On Render, select **Environment → Edit**, update the private values, then **Save, rebuild, and deploy**. An environment change does not affect an already-running process until deployment. Keep `GEMINI_API_KEY` private on the server. If a screenshot or public file exposes a key or token, replace it privately in the provider console and deployment settings.
+
+Open `/health` to check the service: `status: "ok"` means it is running, and `aiReady: true` means its required environment values satisfy validation. This does not verify the Gemini key, quota, or provider response; create a plan in the app to test those. Server startup logs identify missing or invalid settings without printing their values. A Render free service can take about a minute to wake; retry after it is running.
+
 The access token is encrypted with an Android Keystore key. AI sends only the entered goal, never the offline task database. Provider request storage is disabled with `store: false`; normal provider terms and processing still apply. The response must satisfy a bounded schema and server-side validation. AI cannot send messages, execute code or modify tasks without the user's approval.
 
 The included service is a personal first-version backend with a private access token, in-memory rate limits and a daily request ceiling. Before opening AI access to many users, replace shared-token access with individual authenticated sessions, durable quotas and deployment-specific access control. Provider usage and hosting may have costs; neither is configured or deployed by the source archive.

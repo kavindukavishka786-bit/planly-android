@@ -15,8 +15,7 @@ class AiClient(private val context: Context) {
         val uri = runCatching { URI(p.endpoint.trim()) }.getOrNull()
         require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { "Set a valid HTTPS AI server URL in Settings." }
         val token = SecretStore(context).read()
-        require(token.isNotBlank()) { "Add your AI server access token in Settings." }
-        require(token.all { it.code in 33..126 }) { "Use an access token without spaces or line breaks." }
+        AiRules.validateToken(token)?.let { throw IllegalArgumentException(it) }
         val connection = URI(p.endpoint.trim().trimEnd('/') + "/api/plan").toURL().openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"; connection.connectTimeout = 15_000; connection.readTimeout = 60_000
@@ -28,7 +27,7 @@ class AiClient(private val context: Context) {
             require(status == 200) { when (status) {
                 401 -> "The AI server access token is incorrect."
                 429 -> "The AI service is busy. Please try again later."
-                503 -> "The AI service is not configured yet."
+                503 -> "AI server setup is incomplete. Set its Gemini key and a random access token of at least 32 characters, then redeploy. Save the same token in Settings."
                 else -> "AI request failed ($status). Please try again."
             } }
             val text = connection.inputStream.use { input ->
