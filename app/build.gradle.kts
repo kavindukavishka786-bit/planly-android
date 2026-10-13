@@ -19,6 +19,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    signingConfigs {
+        getByName("debug") {
+            System.getenv("PLANLY_DEBUG_KEYSTORE")?.let { storeFile = file(it) }
+        }
+    }
     buildTypes { release { isMinifyEnabled = false } }
 }
 dependencies {
