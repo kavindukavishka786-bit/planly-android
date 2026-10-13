@@ -52,6 +52,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
@@ -71,6 +72,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     "Tasks" -> Icons.Outlined.TaskAlt
     "Focus" -> Icons.Outlined.Timer
     "AI planner" -> Icons.Outlined.AutoAwesome
+    "Progress" -> Icons.Outlined.BarChart
     else -> Icons.Outlined.Settings
 }
 
@@ -103,6 +105,12 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(openTask) { if (openTask != null) { detail = openTask; onOpened() } }
+    LaunchedEffect(data.focusEnd) {
+        if (data.focusEnd > 0) {
+            delay((data.focusEnd - System.currentTimeMillis()).coerceAtLeast(0))
+            if (store.finishFocus()) message("Focus session complete. Take a short break.")
+        }
+    }
     BackHandler(drawer.isOpen || detail != null || page != "Today") {
         when { drawer.isOpen -> scope.launch { drawer.close() }; detail != null -> detail = null; else -> page = "Today" }
     }
@@ -120,7 +128,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                     Spacer(Modifier.height(20.dp)); Text("Welcome back,", color = p.onGreen, fontSize = 13.sp)
                     Text(data.preferences.name.ifBlank { "Your space" }, color = p.onGreen, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(30.dp))
-                    (pages + listOf("Focus", "AI planner")).forEach { name ->
+                    (pages + listOf("Focus", "AI planner", "Progress")).forEach { name ->
                         TextButton(onClick = { detail = null; page = name; scope.launch { drawer.close() } }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = p.onGreen)) {
                             Icon(pageIcon(name), null); Spacer(Modifier.width(14.dp)); Text(name, modifier = Modifier.weight(1f), fontSize = 15.sp)
                         }
@@ -171,11 +179,12 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                         (fadeIn(tween(240)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 20 }) togetherWith fadeOut(tween(160))
                     }, label = "Navigation") { screen ->
                         val shownTask = data.tasks.find { it.id == screen.second }
-                        if (shownTask != null) TaskDetail(shownTask, onToggle = { store.toggle(shownTask.id) }, onDelete = { deleteId = shownTask.id }, onFocus = {
+                        if (shownTask != null) TaskDetail(shownTask, onToggle = { store.toggle(shownTask.id) }, onDelete = { deleteId = shownTask.id },
+                            onChecklist = { store.toggleChecklist(shownTask.id, it) }, onFocus = {
                             store.resetFocus(shownTask.title); detail = null; page = "Focus"
                         }) else when (screen.first) {
                             "Today" -> TodayScreen(data, store, onTask = { detail = it }, onAdd = { editId = null; day = LocalDate.now().toString(); editorOpen = true },
-                                onCalendar = { date -> day = date.toString(); page = "Calendar" }, onAI = { page = "AI planner" }, onFocus = { page = "Focus" })
+                                onCalendar = { date -> day = date.toString(); page = "Calendar" }, onAI = { page = "AI planner" }, onFocus = { page = "Focus" }, onProgress = { page = "Progress" })
                             "Calendar" -> CalendarScreen(data, LocalDate.parse(day), onDay = { day = it.toString() }, onTask = { detail = it }, onAdd = { editId = null; editorOpen = true })
                             "Tasks" -> TasksScreen(data, onTask = { detail = it }, onAdd = { editId = null; editorOpen = true })
                             "Settings" -> SettingsScreen(data.preferences, permissionsVersion,
@@ -183,8 +192,9 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                                     if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                                     else store.preferences(data.preferences.copy(reminders = enabled))
                                 }, onMessage = ::message)
-                            "Focus" -> FocusScreen(data, store, onFinished = { message("Focus session complete. Take a short break.") })
+                            "Focus" -> FocusScreen(data, store)
                             "AI planner" -> AIScreen(data.preferences, store, onSettings = { page = "Settings" }, onMessage = ::message)
+                            "Progress" -> ProgressScreen(data)
                         }
                     }
                 }
@@ -224,6 +234,11 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                     textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None)
                 Spacer(Modifier.height(5.dp))
                 Text("${task.timeLabel()} · ${task.minutes} min · ${task.project}", color = p.secondaryText, fontSize = 11.sp)
+                if (task.checklist.isNotEmpty() || task.repeat != "Off") {
+                    val parts = listOfNotNull(if (task.checklist.isNotEmpty()) "${task.checklist.count { it.done }}/${task.checklist.size} checklist" else null,
+                        if (task.repeat != "Off") "Repeats ${task.repeat.lowercase()}" else null)
+                    Text(parts.joinToString(" · "), color = p.green, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+                }
                 if (task.done) Text("Completed", color = p.green, fontSize = 11.sp)
             }
             IconButton(onClick = onOpen) { Icon(Icons.Outlined.ChevronRight, "View task", tint = p.secondaryText) }
@@ -240,7 +255,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     }
 }
 @Composable private fun TodayScreen(data: AppData, store: AppStore, onTask: (String) -> Unit, onAdd: () -> Unit,
-    onCalendar: (LocalDate) -> Unit, onAI: () -> Unit, onFocus: () -> Unit) {
+    onCalendar: (LocalDate) -> Unit, onAI: () -> Unit, onFocus: () -> Unit, onProgress: () -> Unit) {
     val p = LocalPlanly.current
     val today = LocalDate.now()
     val tasks = remember(data.tasks, today) { data.tasks.filter { TaskRules.dayOf(it) == today }.sortedBy { it.dueAt } }
@@ -278,7 +293,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             }
         }
         item {
-            Surface(color = p.surface, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, p.outline.copy(alpha = .65f))) {
+            Surface(onClick = onProgress, color = p.surface, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, p.outline.copy(alpha = .65f))) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize(), color = p.green,
@@ -291,6 +306,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                         Text("${tasks.filterNot { it.done }.sumOf { it.minutes }} min remaining · At your pace", color = p.secondaryText,
                             fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
                     }
+                    Icon(Icons.Outlined.ChevronRight, "View progress", tint = p.green)
                 }
             }
         }
@@ -347,23 +363,34 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     val p = LocalPlanly.current
     var filter by rememberSaveable { mutableStateOf("Active") }
     var query by rememberSaveable { mutableStateOf("") }
-    val tasks = remember(data.tasks, filter, query) {
-        data.tasks.filter { (filter == "All" || (filter == "Active" && !it.done) || (filter == "Done" && it.done)) &&
-            (query.isBlank() || it.title.contains(query.trim(), ignoreCase = true) || it.project.contains(query.trim(), ignoreCase = true)) }.sortedBy { it.dueAt }
+    var project by rememberSaveable { mutableStateOf("All projects") }
+    var priority by rememberSaveable { mutableStateOf("Any priority") }
+    var sort by rememberSaveable { mutableStateOf("Due date") }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(filter) { now = System.currentTimeMillis(); if (filter == "Overdue") while (true) { delay(60_000); now = System.currentTimeMillis() } }
+    val tasks = remember(data.tasks, filter, query, project, priority, sort, now) {
+        TaskRules.search(data.tasks, filter, query, project, priority, sort, now)
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            OutlinedTextField(query, { query = it.take(100) }, placeholder = { Text("Search tasks or projects", fontSize = 13.sp) },
+            OutlinedTextField(query, { query = it.take(100) }, placeholder = { Text("Search tasks, notes or checklist", fontSize = 13.sp) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth())
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Active", "Done", "All").forEachIndexed { i, name ->
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Active", "Done", "Overdue", "All").forEachIndexed { i, name ->
                 val selected = filter == name
                 FilterChip(selected = selected, onClick = { filter = name }, label = { Text(name) },
                     shape = RoundedCornerShape(20.dp), colors = FilterChipDefaults.filterChipColors(
-                        containerColor = listOf(p.mint, p.lavender, p.peach)[i], labelColor = p.text,
+                        containerColor = listOf(p.mint, p.lavender, p.peach, p.sky)[i], labelColor = p.text,
                         selectedContainerColor = p.green, selectedLabelColor = p.onGreen))
             } }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                TaskFilterMenu("Project", listOf("All projects") + data.tasks.map { it.project }.distinct().sorted(), project, Modifier.weight(1f)) { project = it }
+                TaskFilterMenu("Priority", listOf("Any priority", "High", "Normal", "Low"), priority, Modifier.weight(1f)) { priority = it }
+                TaskFilterMenu("Sort", listOf("Due date", "Priority", "Shortest"), sort, Modifier.weight(1f)) { sort = it }
+            }
         }
         item {
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))) {
@@ -377,7 +404,10 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         }
         item { SectionTitle(if (query.isBlank()) "Your ${filter.lowercase()} tasks" else "Search results") }
         if (tasks.isEmpty()) item {
-            if (query.isBlank()) EmptyTasks(onAdd) else Text("No matching tasks. Try another name or project.", color = p.secondaryText, fontSize = 14.sp, modifier = Modifier.padding(vertical = 24.dp))
+            if (data.tasks.isEmpty()) EmptyTasks(onAdd) else Column(Modifier.padding(vertical = 20.dp)) {
+                Text("No tasks match these filters.", color = p.secondaryText, fontSize = 14.sp)
+                TextButton(onClick = { query = ""; project = "All projects"; priority = "Any priority"; filter = "All" }) { Text("Clear filters") }
+            }
         }
         items(tasks, key = { it.id }) { t -> Column(Modifier.animateItem()) {
             Text(TaskRules.dayOf(t).format(dayFormat), color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
@@ -385,7 +415,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         } }
     }
 }
-@Composable private fun TaskDetail(task: Task, onToggle: () -> Unit, onDelete: () -> Unit, onFocus: () -> Unit) {
+@Composable private fun TaskDetail(task: Task, onToggle: () -> Unit, onDelete: () -> Unit, onChecklist: (String) -> Unit, onFocus: () -> Unit) {
     val p = LocalPlanly.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Surface(color = p.mint, shape = RoundedCornerShape(10.dp)) { Text(task.project, color = p.green, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) }
@@ -393,8 +423,18 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Schedule, null, tint = p.green); Spacer(Modifier.width(8.dp)); Text("${TaskRules.dayOf(task).format(dayFormat)} · ${task.timeLabel()}", color = p.green, fontSize = 13.sp) }
         Spacer(Modifier.height(30.dp)); SectionTitle("Description")
         Text(task.notes.ifBlank { "No notes yet. Tap Edit to add a few details." }, color = p.secondaryText, fontSize = 14.sp, lineHeight = 24.sp, modifier = Modifier.padding(top = 12.dp))
+        if (task.checklist.isNotEmpty()) {
+            Spacer(Modifier.height(24.dp)); SectionTitle("Checklist · ${task.checklist.count { it.done }}/${task.checklist.size}")
+            task.checklist.forEach { item ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onChecklist(item.id) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(item.done, onCheckedChange = { onChecklist(item.id) })
+                    Text(item.title, color = p.text, fontSize = 14.sp, modifier = Modifier.weight(1f), textDecoration = if (item.done) TextDecoration.LineThrough else TextDecoration.None)
+                }
+            }
+        }
         Spacer(Modifier.height(28.dp)); SectionTitle("Task details")
         DetailLine("Time estimate", "${task.minutes} min"); DetailLine("Priority", task.priority)
+        DetailLine("Repeat", task.repeat)
         DetailLine("Reminder", if (task.reminderMinutes < 0) "Off" else if (task.reminderMinutes == 0) "At task time" else "${task.reminderMinutes} min before")
         Spacer(Modifier.height(20.dp))
         Button(onClick = onToggle, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (task.done) "Mark incomplete" else "Mark complete") }
@@ -420,6 +460,8 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     var project by rememberSaveable(original?.id) { mutableStateOf(original?.project ?: "Personal") }
     var priority by rememberSaveable(original?.id) { mutableStateOf(original?.priority ?: "Normal") }
     var reminder by rememberSaveable(original?.id) { mutableIntStateOf(original?.reminderMinutes ?: 10) }
+    var repeat by rememberSaveable(original?.id) { mutableStateOf(original?.repeat ?: "Off") }
+    var checklistText by rememberSaveable(original?.id) { mutableStateOf(original?.checklist?.joinToString("\n") { it.title } ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = LocalPlanly.current.surface) {
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).animateContentSize(tween(220)).padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -432,18 +474,28 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             }
             Picker("Project", listOf("Personal", "Studies", "Work", "Creative"), project) { project = it }
             Picker("Priority", listOf("Low", "Normal", "High"), priority) { priority = it }
+            Picker("Repeat", TaskRules.repeatOptions, repeat) { repeat = it }
+            if (repeat != "Off") Text("Completing this task creates its next future occurrence. Change Repeat on the latest active task to stop future repeats.", color = LocalPlanly.current.secondaryText, fontSize = 11.sp, lineHeight = 17.sp)
             Picker("Reminder", listOf("Off", "At task time", "10 min before", "30 min before"), when (reminder) { -1 -> "Off"; 0 -> "At task time"; 30 -> "30 min before"; else -> "10 min before" }) {
                 reminder = when (it) { "Off" -> -1; "At task time" -> 0; "30 min before" -> 30; else -> 10 }
             }
             OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, label = { Text("Estimated minutes") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(checklistText, { checklistText = it.take(2200) }, label = { Text("Checklist (one step per line)") },
+                supportingText = { Text("Up to 20 steps, 100 characters each") }, minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
             if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             Button(onClick = {
                 val duration = minutes.toIntOrNull() ?: 0
                 error = TaskRules.validate(title, duration)
+                val lines = checklistText.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                if (error == null && (lines.size > 20 || lines.any { it.length > 100 })) error = "Use up to 20 checklist steps, each under 100 characters."
                 if (error == null) {
                     val due = LocalDate.parse(date).atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                     val base = original ?: Task(title = title.trim(), dueAt = due)
-                    onSave(base.copy(title = title.trim(), notes = notes.trim(), project = project, dueAt = due, minutes = duration, priority = priority, reminderMinutes = reminder))
+                    val checklist = lines.mapIndexed { i, text ->
+                        original?.checklist?.getOrNull(i)?.takeIf { it.title == text } ?: ChecklistItem(title = text)
+                    }
+                    onSave(base.copy(title = title.trim(), notes = notes.trim(), project = project, dueAt = due, minutes = duration, priority = priority, reminderMinutes = reminder,
+                        repeat = repeat, checklist = checklist))
                 }
             }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Save task") }
             Text("Enable notifications in Settings to receive reminders.", color = LocalPlanly.current.secondaryText, fontSize = 11.sp)
@@ -498,7 +550,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
             else if (tokenProblem != null) onMessage(tokenProblem)
             else runCatching { secrets.save(token); onChange(prefs.copy(endpoint = endpoint.trim().trimEnd('/'))); onMessage("AI connection saved.") }.onFailure { onMessage("Could not save credentials. Please try again.") }
         }, modifier = Modifier.fillMaxWidth()) { Text("Save AI connection") }
-        Text("PLANLY 0.2.0 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
+        Text("PLANLY 0.3.0 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
     }
 }
 @Composable private fun SwitchLine(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -513,14 +565,17 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         Text(label, Modifier.weight(1f)); Text(LocalTime.of(minute / 60, minute % 60).format(timeFormat))
     }
 }
-@Composable private fun FocusScreen(data: AppData, store: AppStore, onFinished: () -> Unit) {
+@Composable private fun FocusScreen(data: AppData, store: AppStore) {
     val p = LocalPlanly.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(data.focusEnd) {
-        if (data.focusEnd > 0) while (true) {
-            now = System.currentTimeMillis()
-            if (now >= data.focusEnd) { store.finishFocus(); onFinished(); break }
-            delay(1000)
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(data.focusEnd, owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (data.focusEnd > 0) while (true) {
+                now = System.currentTimeMillis()
+                if (now >= data.focusEnd) break
+                delay(1000)
+            }
         }
     }
     val seconds = if (data.focusEnd > 0) ((data.focusEnd - now) / 1000).coerceAtLeast(0) else data.focusRemaining
@@ -528,6 +583,10 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         Text("One thing at a time.", color = p.green, fontSize = 13.sp)
         Text("A little focus.", color = p.text, fontSize = 29.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 18.dp))
         Text(data.focusTask.ifBlank { "Your next small step" }, color = p.secondaryText, fontSize = 14.sp, modifier = Modifier.padding(vertical = 18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(15, 25, 45).forEach { minutes -> FilterChip(selected = data.focusDuration == minutes * 60L, enabled = data.focusEnd == 0L,
+                onClick = { store.focusPreset(minutes) }, label = { Text("$minutes min") }) }
+        }
         GlassPanel(data.preferences.glass, Modifier.fillMaxWidth().padding(top = 20.dp)) {
             Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(String.format(Locale.getDefault(), "%02d:%02d", seconds / 60, seconds % 60), color = p.text, fontSize = 52.sp, fontWeight = FontWeight.Medium)

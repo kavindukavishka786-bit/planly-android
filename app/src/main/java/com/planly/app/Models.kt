@@ -2,6 +2,10 @@ package com.planly.app
 
 import java.time.*
 import java.util.UUID
+import java.time.temporal.ChronoUnit
+
+data class ChecklistItem(val id: String = UUID.randomUUID().toString(), val title: String, val done: Boolean = false)
+data class FocusSession(val id: String = UUID.randomUUID().toString(), val task: String, val minutes: Int, val finishedAt: Long)
 
 data class Task(
     val id: String = UUID.randomUUID().toString(),
@@ -14,7 +18,11 @@ data class Task(
     val reminderMinutes: Int = 10,
     val done: Boolean = false,
     val snoozedUntil: Long = 0,
-    val notifiedAt: Long = 0
+    val notifiedAt: Long = 0,
+    val repeat: String = "Off",
+    val generatedBy: String = "",
+    val checklist: List<ChecklistItem> = emptyList(),
+    val completedAt: Long = 0
 )
 data class Preferences(
     val theme: String = "Light", val glass: Boolean = true, val name: String = "",
@@ -23,8 +31,17 @@ data class Preferences(
     val aiEnabled: Boolean = false, val endpoint: String = ""
 )
 data class AppData(val tasks: List<Task> = emptyList(), val preferences: Preferences = Preferences(),
-    val focusEnd: Long = 0, val focusRemaining: Long = 25 * 60, val focusTask: String = "")
+    val focusEnd: Long = 0, val focusRemaining: Long = 25 * 60, val focusTask: String = "",
+    val focusDuration: Long = 25 * 60, val sessions: List<FocusSession> = emptyList())
 data class AiStep(val title: String, val minutes: Int, val notes: String)
+
+object FocusRules {
+    fun finish(data: AppData, now: Long): AppData {
+        if (data.focusEnd <= 0 || data.focusEnd > now) return data
+        val session = FocusSession(task = data.focusTask, minutes = (data.focusDuration / 60).toInt(), finishedAt = data.focusEnd)
+        return data.copy(focusEnd = 0, focusRemaining = 0, sessions = (data.sessions + session).takeLast(365))
+    }
+}
 
 object AiRules {
     fun validateToken(token: String): String? = when {
@@ -35,6 +52,41 @@ object AiRules {
 }
 
 object TaskRules {
+    val repeatOptions = listOf("Off", "Daily", "Weekly")
+    fun nextOccurrence(task: Task, now: Long, zone: ZoneId = ZoneId.systemDefault()): Task? {
+        val days = when (task.repeat) { "Daily" -> 1L; "Weekly" -> 7L; else -> return null }
+        var date = Instant.ofEpochMilli(task.dueAt).atZone(zone).plusDays(days)
+        val localNow = Instant.ofEpochMilli(now).atZone(zone)
+        if (date.toInstant().toEpochMilli() <= now) {
+            val gap = ChronoUnit.DAYS.between(date.toLocalDate(), localNow.toLocalDate()).coerceAtLeast(0)
+            date = date.plusDays((gap / days) * days)
+            if (date.toInstant().toEpochMilli() <= now) date = date.plusDays(days)
+        }
+        return task.copy(id = UUID.randomUUID().toString(), dueAt = date.toInstant().toEpochMilli(), done = false,
+            generatedBy = task.id, snoozedUntil = 0, notifiedAt = 0, completedAt = 0,
+            checklist = task.checklist.map { it.copy(id = UUID.randomUUID().toString(), done = false) })
+    }
+    fun toggleCompletion(tasks: List<Task>, id: String, now: Long, zone: ZoneId = ZoneId.systemDefault()): List<Task> {
+        val task = tasks.find { it.id == id } ?: return tasks
+        val updated = task.copy(done = !task.done, completedAt = if (task.done) 0 else now, snoozedUntil = 0, notifiedAt = 0)
+        val next = tasks.map { if (it.id == id) updated else it }
+        val occurrence = if (!task.done && tasks.none { it.generatedBy == id }) nextOccurrence(task, now, zone) else null
+        return if (occurrence == null) next else next + occurrence
+    }
+    fun search(tasks: List<Task>, filter: String, query: String, project: String, priority: String, sort: String, now: Long): List<Task> {
+        val term = query.trim()
+        val found = tasks.filter { task ->
+            val matchesState = when (filter) { "Active" -> !task.done; "Done" -> task.done; "Overdue" -> !task.done && task.dueAt < now; else -> true }
+            matchesState && (project == "All projects" || task.project == project) && (priority == "Any priority" || task.priority == priority) &&
+                (term.isEmpty() || listOf(task.title, task.notes, task.project).any { it.contains(term, ignoreCase = true) } || task.checklist.any { it.title.contains(term, ignoreCase = true) })
+        }
+        val comparator = when (sort) {
+            "Priority" -> compareBy<Task> { when (it.priority) { "High" -> 0; "Normal" -> 1; else -> 2 } }.thenBy { it.dueAt }
+            "Shortest" -> compareBy<Task> { it.minutes }.thenBy { it.dueAt }
+            else -> compareBy<Task> { it.dueAt }
+        }
+        return found.sortedWith(comparator.thenBy { it.id })
+    }
     fun validate(title: String, minutes: Int): String? = when {
         title.trim().isEmpty() -> "Give your task a name."
         title.trim().length > 100 -> "Keep task names under 100 characters."

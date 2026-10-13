@@ -6,6 +6,12 @@ Version 0.2.0 adds a lightweight vector garden welcome card, pastel week tiles, 
 
 Commits containing `[ui-preview]` also capture real Android emulator screenshots in the **PLANLY-UI-preview** workflow artifact. The screenshots use a fresh install without personal content. You can request them again using **Run workflow**.
 
+Version 0.3.0 adds daily/weekly recurring tasks, up to 20 checklist steps per task, overdue/project/priority filters, search across notes and checklist text, priority/time sorting, 15/25/45-minute focus presets, completed focus history, and a Progress screen with seven-day completions and project totals. Recurring tasks create one next future occurrence on completion and skip missed occurrences; marking the original incomplete and completing it again does not create duplicates. The next task starts with an unchecked checklist. To stop future repeats, change Repeat to Off on the latest active task.
+
+The update reads older task data with defaults and retains existing tasks. Completion dates begin recording in this version; old completed tasks remain completed but do not invent completion dates. Statistics count retained tasks and the last 365 completed focus sessions. The seven-day focus total counts completed timer durations, not paused or reset sessions. Recurrence uses local calendar time across daylight-saving changes.
+
+For responsiveness, theme/timer changes avoid serializing the entire task list, checklist toggles avoid rescheduling alarms, filtered lists reuse their results until inputs change, and overdue refresh runs only while that filter is open. Lists stay lazy and artwork is native vector drawing. Real phone frame rate and battery behavior still need device testing.
+
 ## First version
 
 - Today dashboard with progress and one-tap task completion.
@@ -67,7 +73,7 @@ Turn on task notifications in Settings, grant Android's permission, and schedule
 - `TaskRulesTest.kt` verifies title/duration validation and quiet-hour behavior across midnight.
 - Local verification on this version passed Android compilation, all seven Android unit tests, lint with no errors, and all eight backend checks. A development APK was assembled. These checks do not replace phone testing.
 - The GitHub workflow provides the full Android compile, unit-test, lint and APK checks.
-- No production backend, account sync, shared projects, repeating tasks or published release is included yet.
+- No production backend, account sync, shared projects or published release is included yet.
 - Device reminder delivery, notification permission flows and actual Gemini responses still need end-to-end testing on your phone and configured service.
 
 ## Official references
