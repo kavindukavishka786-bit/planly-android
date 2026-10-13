@@ -12,8 +12,7 @@ class AiClient(private val context: Context) {
         require(goal.trim().length in 3..1500) { "Describe a goal using 3 to 1,500 characters." }
         val p = AppStore.get(context).state.value.preferences
         require(p.aiEnabled) { "Enable AI assistance in Settings." }
-        val uri = runCatching { URI(p.endpoint.trim()) }.getOrNull()
-        require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { "Set a valid HTTPS AI server URL in Settings." }
+        require(AiRules.validEndpoint(p.endpoint)) { "Use your HTTPS server address without /health, /api/plan, credentials, or query parameters." }
         val token = SecretStore(context).read()
         AiRules.validateToken(token)?.let { throw IllegalArgumentException(it) }
         val connection = URI(p.endpoint.trim().trimEnd('/') + "/api/plan").toURL().openConnection() as HttpURLConnection

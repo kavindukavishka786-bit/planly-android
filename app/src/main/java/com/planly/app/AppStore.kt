@@ -32,7 +32,7 @@ class AppStore private constructor(private val context: Application) {
             glass = prefs.getBoolean("glass", true), name = prefs.getString("name", "") ?: "",
             reminders = prefs.getBoolean("reminders", false), quietHours = prefs.getBoolean("quiet", false),
             quietStart = prefs.getInt("quietStart", 1320), quietEnd = prefs.getInt("quietEnd", 420),
-            aiEnabled = prefs.getBoolean("ai", false), endpoint = prefs.getString("endpoint", "") ?: ""),
+            aiEnabled = prefs.getBoolean("ai", false), endpoint = prefs.getString("endpoint", "") ?: "", screenBreaks = prefs.getBoolean("screenBreaks", false), reduceMotion = prefs.getBoolean("reduceMotion", false)),
             prefs.getLong("focusEnd", 0), prefs.getLong("focusRemaining", 1500), prefs.getString("focusTask", "") ?: "",
             prefs.getLong("focusDuration", 1500), runCatching {
                 val a = JSONArray(prefs.getString("sessions", "[]"))
@@ -66,7 +66,7 @@ class AppStore private constructor(private val context: Application) {
         edit.putString("theme", p.theme).putBoolean("glass", p.glass)
             .putString("name", p.name).putBoolean("reminders", p.reminders).putBoolean("quiet", p.quietHours)
             .putInt("quietStart", p.quietStart).putInt("quietEnd", p.quietEnd).putBoolean("ai", p.aiEnabled)
-            .putString("endpoint", p.endpoint).putLong("focusEnd", next.focusEnd)
+            .putString("endpoint", p.endpoint).putBoolean("screenBreaks", p.screenBreaks).putBoolean("reduceMotion", p.reduceMotion).putLong("focusEnd", next.focusEnd)
             .putLong("focusRemaining", next.focusRemaining).putString("focusTask", next.focusTask)
             .putLong("focusDuration", next.focusDuration).apply()
         mutable.value = next
@@ -101,9 +101,16 @@ class AppStore private constructor(private val context: Application) {
     @Synchronized fun preferences(p: Preferences) {
         val old = mutable.value.preferences
         save(mutable.value.copy(preferences = p))
-        if (old.reminders != p.reminders || old.quietHours != p.quietHours || old.quietStart != p.quietStart || old.quietEnd != p.quietEnd) reschedule()
+        if (old.reminders != p.reminders || old.screenBreaks != p.screenBreaks || old.quietHours != p.quietHours || old.quietStart != p.quietStart || old.quietEnd != p.quietEnd) reschedule()
     }
-    @Synchronized fun reschedule() { mutable.value.tasks.forEach { Reminders.schedule(context, it, mutable.value.preferences) } }
+    @Synchronized fun reschedule(force: Boolean = false): Int {
+        if (force) { Reminders.resetCache(); ScreenBreaks.resetCache() }
+        Reminders.channels(context)
+        var failures = mutable.value.tasks.count { !Reminders.schedule(context, it, mutable.value.preferences) }
+        if (!ScreenBreaks.sync(context, mutable.value.preferences)) failures++
+        if (failures == 0) AppDiagnostics.clearIf(context, "REMINDER_SCHEDULING")
+        return failures
+    }
     @Synchronized fun markNotified(id: String) {
         save(mutable.value.copy(tasks = mutable.value.tasks.map { if (it.id == id) it.copy(notifiedAt = System.currentTimeMillis(), snoozedUntil = 0) else it }))
     }

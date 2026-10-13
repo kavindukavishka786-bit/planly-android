@@ -12,6 +12,12 @@ The update reads older task data with defaults and retains existing tasks. Compl
 
 For responsiveness, theme/timer changes avoid serializing the entire task list, checklist toggles avoid rescheduling alarms, filtered lists reuse their results until inputs change, and overdue refresh runs only while that filter is open. Lists stay lazy and artwork is native vector drawing. Real phone frame rate and battery behavior still need device testing.
 
+Version 0.4.0 adds **App Health** in the menu and Settings. It checks notification channels, precise alarm access, battery restrictions and local AI setup, can rebuild schedules, sends a test notification, and tests server authentication with an invalid goal that does not invoke Gemini or create tasks. A local notice records fixed error categories without keys, tokens, task text or raw server bodies. The optional copied report contains only diagnostic flags. Fix issues rebuilds app-controlled schedules; it cannot override Android permissions, manufacturer restrictions, server credentials or arbitrary application bugs.
+
+**Hourly screen breaks** are opt-in in Settings. The first reminder is one hour after enabling, and opening the app preserves the next scheduled time. Delivery requires an unlocked, interactive phone and an enabled notification channel. Quiet hours defer the reminder; missed reminders do not replay a backlog. An action on the notification turns the feature off. This is a scheduled screen-break prompt, not a measurement of continuous screen usage. Task and break alarms recover after reboot, timezone/time changes, package updates and exact-permission grants. Android and OEM battery policies can still delay alarms, and a force-stopped app must be reopened.
+
+Transitions now include eased entry/exit motion with a Reduced motion setting. Resuming the app restores schedules off the UI thread and avoids resetting unchanged task alarms. Blocking or revoking precise alarms uses an inexact fallback rather than crashing. Channels are checked before marking a task reminder delivered, so a blocked channel does not mark it as notified.
+
 ## First version
 
 - Today dashboard with progress and one-tap task completion.

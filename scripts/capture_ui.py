@@ -67,17 +67,19 @@ def preferences():
     root = ET.fromstring(adb('shell', 'run-as', 'com.planly.app', 'cat', 'shared_prefs/planly.xml'))
     return {node.get('name'): (node.text if node.tag == 'string' else node.get('value')) for node in root}
 
-def write_preferences(values):
+def write_preferences(values, filename='planly.xml'):
     root = ET.Element('map')
     for name, value in values.items():
-        if name in ('tasks', 'sessions', 'theme', 'focusTask'):
+        if isinstance(value, bool):
+            ET.SubElement(root, 'boolean', name=name, value=str(value).lower())
+        elif name in ('tasks', 'sessions', 'theme', 'focusTask'):
             ET.SubElement(root, 'string', name=name).text = value
         else:
             ET.SubElement(root, 'long', name=name, value=str(value))
     fixture = OUTPUT / 'fixture.xml'
     fixture.write_bytes(ET.tostring(root, encoding='utf-8', xml_declaration=True))
     adb('push', str(fixture), '/data/local/tmp/planly-fixture.xml')
-    adb('shell', 'run-as', 'com.planly.app', 'cp', '/data/local/tmp/planly-fixture.xml', 'shared_prefs/planly.xml')
+    adb('shell', 'run-as', 'com.planly.app', 'cp', '/data/local/tmp/planly-fixture.xml', 'shared_prefs/' + filename)
     fixture.unlink()
 
 def launch():
@@ -155,3 +157,56 @@ assert len(json.loads(preferences()['tasks'])) == 3, 'Tasks did not persist acro
 OUTPUT.joinpath('feature-checks.txt').write_text('PASS: legacy migration, checklist persistence, recurring duplicate protection, overdue filter, checklist search, project filter, focus presets, pause, expired timer recovery, focus history and restart persistence.\n')
 OUTPUT.joinpath('startup-log.txt').write_bytes(adb('logcat', '-d', '-s', 'AndroidRuntime:E'))
 print('Advanced Android feature checks passed.')
+
+# Background delivery checks use granted permissions on this disposable emulator.
+tap('Open menu')
+tap('App Health')
+before = json.loads(preferences()['tasks'])
+tap('Fix issues')
+assert json.loads(preferences()['tasks']) == before, 'Fix issues changed saved tasks'
+capture('13-app-health-light')
+adb('shell', 'pm', 'grant', 'com.planly.app', 'android.permission.POST_NOTIFICATIONS')
+adb('shell', 'appops', 'set', 'com.planly.app', 'SCHEDULE_EXACT_ALARM', 'allow')
+adb('shell', 'settings', 'put', 'system', 'screen_off_timeout', '600000')
+adb('shell', 'input', 'keyevent', '224')
+adb('shell', 'wm', 'dismiss-keyguard')
+saved = preferences()
+now = int(time.time() * 1000)
+records = json.loads(saved['tasks'])
+records.append({'id': 'alarm-test', 'title': 'Task reminder smoke test', 'project': 'Personal',
+                'dueAt': now + 25000, 'minutes': 15, 'priority': 'Normal', 'reminder': 0, 'done': False})
+adb('shell', 'am', 'force-stop', 'com.planly.app')
+write_preferences({'theme': 'Light', 'tasks': json.dumps(records), 'sessions': saved['sessions'],
+                   'reminders': True, 'screenBreaks': True, 'quiet': False})
+write_preferences({'nextAt': now + 20000}, 'planly_breaks.xml')
+launch()
+adb('shell', 'input', 'keyevent', '3')
+time.sleep(32)
+notifications = adb('shell', 'dumpsys', 'notification', '--noredact').decode(errors='replace')
+assert 'Task reminder smoke test' in notifications, 'Task notification did not arrive in the background'
+assert 'Time for a screen break' in notifications, 'Hourly screen-break notification did not arrive'
+records = json.loads(preferences()['tasks'])
+assert next(t for t in records if t['id'] == 'alarm-test')['notified'] > 0, 'Task delivery was not recorded'
+break_root = ET.fromstring(adb('shell', 'run-as', 'com.planly.app', 'cat', 'shared_prefs/planly_breaks.xml'))
+next_break = int(break_root.find("long[@name='nextAt']").get('value'))
+assert next_break > int(time.time() * 1000) + 3000000, 'Screen break did not advance to the next hour'
+launch()
+tap('Open menu')
+tap('App Health')
+tap('Fix issues')
+assert len(json.loads(preferences()['tasks'])) == 4, 'Reminder repair deleted task data'
+tap('Send test reminder')
+assert 'PLANLY reminder test' in adb('shell', 'dumpsys', 'notification', '--noredact').decode(errors='replace')
+capture('14-app-health-ready')
+tap('Settings')
+tap('Hourly screen breaks')
+assert preferences()['screenBreaks'] == 'false', 'Hourly reminder switch did not disable'
+break_root = ET.fromstring(adb('shell', 'run-as', 'com.planly.app', 'cat', 'shared_prefs/planly_breaks.xml'))
+assert break_root.find("long[@name='nextAt']") is None, 'Disabling screen breaks left a next reminder'
+tap('Hourly screen breaks')
+assert preferences()['screenBreaks'] == 'true', 'Hourly reminder switch did not re-enable'
+capture('15-hourly-reminder-settings')
+OUTPUT.joinpath('feature-checks.txt').write_text(OUTPUT.joinpath('feature-checks.txt').read_text() +
+    'PASS: App Health repair preserves tasks, task notification arrives while app is backgrounded, screen-break notification arrives, next hourly reminder advances, test notification sends, hourly switch disables/cancels and re-enables.\n')
+OUTPUT.joinpath('startup-log.txt').write_bytes(adb('logcat', '-d', '-s', 'AndroidRuntime:E'))
+print('App Health and background reminder checks passed.')

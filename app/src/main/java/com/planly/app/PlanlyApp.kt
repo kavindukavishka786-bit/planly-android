@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -66,6 +67,7 @@ private val timeFormat get() = DateTimeFormatter.ofPattern("h:mm a", Locale.getD
 private val dayFormat get() = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())
 private fun Task.timeLabel() = Instant.ofEpochMilli(dueAt).atZone(ZoneId.systemDefault()).format(timeFormat)
 private val pages = listOf("Today", "Calendar", "Tasks", "Settings")
+private val destinations = pages + listOf("Focus", "AI planner", "Progress", "App Health")
 private fun pageIcon(page: String): ImageVector = when (page) {
     "Today" -> Icons.Outlined.Home
     "Calendar" -> Icons.Outlined.CalendarMonth
@@ -73,6 +75,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     "Focus" -> Icons.Outlined.Timer
     "AI planner" -> Icons.Outlined.AutoAwesome
     "Progress" -> Icons.Outlined.BarChart
+    "App Health" -> Icons.Outlined.HealthAndSafety
     else -> Icons.Outlined.Settings
 }
 
@@ -91,15 +94,21 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val owner = LocalLifecycleOwner.current
     var permissionsVersion by remember { mutableIntStateOf(0) }
+    var notificationPurpose by rememberSaveable { mutableStateOf("Tasks") }
     fun message(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        store.preferences(store.state.value.preferences.copy(reminders = granted))
+        val prefs = store.state.value.preferences
+        when (notificationPurpose) {
+            "Tasks" -> store.preferences(prefs.copy(reminders = granted))
+            "Breaks" -> store.preferences(prefs.copy(screenBreaks = granted))
+            else -> scope.launch(kotlinx.coroutines.Dispatchers.IO) { store.reschedule(force = true) }
+        }
         permissionsVersion++
         if (!granted) message("Notifications are off. You can enable them in Android Settings.")
     }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
-            permissionsVersion++; store.reschedule()
+            permissionsVersion++; scope.launch(kotlinx.coroutines.Dispatchers.IO) { store.reschedule() }
         } }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
@@ -128,7 +137,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                     Spacer(Modifier.height(20.dp)); Text("Welcome back,", color = p.onGreen, fontSize = 13.sp)
                     Text(data.preferences.name.ifBlank { "Your space" }, color = p.onGreen, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(30.dp))
-                    (pages + listOf("Focus", "AI planner", "Progress")).forEach { name ->
+                    destinations.forEach { name ->
                         TextButton(onClick = { detail = null; page = name; scope.launch { drawer.close() } }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = p.onGreen)) {
                             Icon(pageIcon(name), null); Spacer(Modifier.width(14.dp)); Text(name, modifier = Modifier.weight(1f), fontSize = 15.sp)
                         }
@@ -148,7 +157,7 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                     navigationIcon = { IconButton(onClick = { if (detail != null) detail = null else scope.launch { drawer.open() } }) {
                         Icon(if (detail != null) Icons.AutoMirrored.Outlined.ArrowBack else Icons.Outlined.Menu, if (detail != null) "Back" else "Open menu") } },
                     actions = {
-                        IconButton(onClick = { detail = null; page = "Settings" }, modifier = Modifier.semantics { contentDescription = "Open settings" }) {
+                        IconButton(onClick = { detail = null; page = if (page == "Today") "Settings" else "App Health" }, modifier = Modifier.semantics { contentDescription = if (page == "Today") "Open settings" else "Open App Health" }) {
                             if (page == "Today") Box(Modifier.size(34.dp).background(p.peach, CircleShape), contentAlignment = Alignment.Center) {
                                 Text(data.preferences.name.firstOrNull()?.uppercase() ?: "P", color = p.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             } else Icon(Icons.Outlined.NotificationsNone, "Notification settings")
@@ -175,8 +184,12 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                 }
             }) { inset ->
                 Box(Modifier.fillMaxSize().padding(inset)) {
-                    AnimatedContent(targetState = page to task?.id, transitionSpec = {
-                        (fadeIn(tween(240)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 20 }) togetherWith fadeOut(tween(160))
+                    AnimatedContent(targetState = page to task?.id, modifier = Modifier.fillMaxSize(), transitionSpec = {
+                        val direction = if (targetState.second != null) 1 else if (initialState.second != null) -1
+                            else if (destinations.indexOf(targetState.first) >= destinations.indexOf(initialState.first)) 1 else -1
+                        if (data.preferences.reduceMotion) fadeIn(tween(90)) togetherWith fadeOut(tween(70))
+                        else (fadeIn(tween(220)) + slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 18 * direction }) togetherWith
+                            (fadeOut(tween(150)) + slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 24 * direction })
                     }, label = "Navigation") { screen ->
                         val shownTask = data.tasks.find { it.id == screen.second }
                         if (shownTask != null) TaskDetail(shownTask, onToggle = { store.toggle(shownTask.id) }, onDelete = { deleteId = shownTask.id },
@@ -189,12 +202,20 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                             "Tasks" -> TasksScreen(data, onTask = { detail = it }, onAdd = { editId = null; editorOpen = true })
                             "Settings" -> SettingsScreen(data.preferences, permissionsVersion,
                                 onChange = { store.preferences(it) }, onNotifications = { enabled ->
-                                    if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) { notificationPurpose = "Tasks"; askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
                                     else store.preferences(data.preferences.copy(reminders = enabled))
-                                }, onMessage = ::message)
+                                }, onBreakNotifications = { enabled ->
+                                    if (enabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) { notificationPurpose = "Breaks"; askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                                    else store.preferences(data.preferences.copy(screenBreaks = enabled))
+                                }, onHealth = { page = "App Health" }, onMessage = ::message)
                             "Focus" -> FocusScreen(data, store)
                             "AI planner" -> AIScreen(data.preferences, store, onSettings = { page = "Settings" }, onMessage = ::message)
                             "Progress" -> ProgressScreen(data)
+                            "App Health" -> AppHealthScreen(data.preferences, permissionsVersion, onNotifications = {
+                                notificationPurpose = "Health"
+                                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                else scope.launch(kotlinx.coroutines.Dispatchers.IO) { store.reschedule(force = true) }
+                            }, onAiSettings = { page = "Settings" }, onMessage = ::message)
                         }
                     }
                 }
@@ -509,7 +530,8 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     }; DropdownMenu(expanded, onDismissRequest = { expanded = false }) { values.forEach { v -> DropdownMenuItem(text = { Text(v) }, onClick = { onChange(v); expanded = false }) } } }
 }
 
-@Composable private fun SettingsScreen(prefs: Preferences, permissionsVersion: Int, onChange: (Preferences) -> Unit, onNotifications: (Boolean) -> Unit, onMessage: (String) -> Unit) {
+@Composable private fun SettingsScreen(prefs: Preferences, permissionsVersion: Int, onChange: (Preferences) -> Unit, onNotifications: (Boolean) -> Unit,
+    onBreakNotifications: (Boolean) -> Unit, onHealth: () -> Unit, onMessage: (String) -> Unit) {
     val context = LocalContext.current
     val p = LocalPlanly.current
     val secrets = remember { SecretStore(context) }
@@ -520,13 +542,16 @@ private fun pageIcon(page: String): ImageVector = when (page) {
     val exact = remember(permissionsVersion) { Build.VERSION.SDK_INT < 31 || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Your look. Your pace. Your choices.", color = p.secondaryText, fontSize = 14.sp)
+        OutlinedButton(onClick = onHealth, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.HealthAndSafety, null); Spacer(Modifier.width(8.dp)); Text("Check and fix issues") }
         Spacer(Modifier.height(8.dp)); SectionTitle("Appearance")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Light", "Dark", "System").forEach { theme -> FilterChip(selected = prefs.theme == theme, onClick = { onChange(prefs.copy(theme = theme)) }, label = { Text(theme) }) } }
         SwitchLine("Glass highlights", "Soft depth on cards and navigation", prefs.glass) { onChange(prefs.copy(glass = it)) }
+        SwitchLine("Reduced motion", "Shorter transitions with less movement", prefs.reduceMotion) { onChange(prefs.copy(reduceMotion = it)) }
         OutlinedTextField(name, { name = it.take(30) }, label = { Text("Your name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         TextButton(onClick = { onChange(prefs.copy(name = name.trim())); onMessage("Name saved.") }) { Text("Save name") }
         SectionTitle("Reminders")
         SwitchLine("Task notifications", if (notifications) "Reminders for tasks you schedule" else "Android notification permission is off", prefs.reminders) { onNotifications(it) }
+        SwitchLine("Hourly screen breaks", "Every hour while your phone is unlocked; respects quiet hours", prefs.screenBreaks) { onBreakNotifications(it) }
         SwitchLine("Quiet hours", "Hold reminders until your quiet hours end", prefs.quietHours) { onChange(prefs.copy(quietHours = it)) }
         if (prefs.quietHours) {
             TimePreference("Quiet hours start", prefs.quietStart) { onChange(prefs.copy(quietStart = it)) }
@@ -544,19 +569,18 @@ private fun pageIcon(page: String): ImageVector = when (page) {
         OutlinedTextField(endpoint, { endpoint = it.take(500) }, label = { Text("AI server URL (HTTPS)") }, placeholder = { Text("https://your-server.example") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(token, { token = it.take(512) }, label = { Text("Server access token") }, supportingText = { Text("32 to 512 characters. Must match your server access token.") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
-            val uri = runCatching { java.net.URI(endpoint.trim()) }.getOrNull()
             val tokenProblem = if (token.isNotEmpty() || prefs.aiEnabled) AiRules.validateToken(token) else null
-            if (endpoint.isNotBlank() && (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null)) onMessage("Enter an HTTPS server URL without credentials or query parameters.")
+            if (endpoint.isNotBlank() && !AiRules.validEndpoint(endpoint)) onMessage("Enter only the HTTPS server address, without /health, /api/plan, credentials or query parameters.")
             else if (tokenProblem != null) onMessage(tokenProblem)
             else runCatching { secrets.save(token); onChange(prefs.copy(endpoint = endpoint.trim().trimEnd('/'))); onMessage("AI connection saved.") }.onFailure { onMessage("Could not save credentials. Please try again.") }
         }, modifier = Modifier.fillMaxWidth()) { Text("Save AI connection") }
-        Text("PLANLY 0.3.0 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
+        Text("PLANLY 0.4.0 · Offline tasks · No account required", color = p.secondaryText, fontSize = 11.sp, modifier = Modifier.padding(vertical = 16.dp))
     }
 }
 @Composable private fun SwitchLine(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).toggleable(value = checked, role = Role.Switch, onValueChange = onChange), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text(title, color = LocalPlanly.current.text, fontSize = 14.sp, fontWeight = FontWeight.Medium); Text(subtitle, color = LocalPlanly.current.secondaryText, fontSize = 11.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp)) }
-        Spacer(Modifier.width(12.dp)); Switch(checked, onCheckedChange = onChange)
+        Spacer(Modifier.width(12.dp)); Switch(checked, onCheckedChange = null)
     }
 }
 @Composable private fun TimePreference(label: String, minute: Int, onChange: (Int) -> Unit) {
@@ -623,7 +647,10 @@ private fun pageIcon(page: String): ImageVector = when (page) {
                 scope.launch { try {
                     steps = AiClient(context).generate(goal); selected = steps.indices.toSet()
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { error = e.message ?: "Could not create a plan. Please try again." }
+                catch (e: Exception) {
+                    error = e.message ?: "Could not create a plan. Please try again."
+                    AppDiagnostics.record(context, "AI_REQUEST_FAILED", "An AI request failed. Review AI setup and test the connection in App Health.")
+                }
                 finally { loading = false } }
             }, modifier = Modifier.fillMaxWidth()) { if (loading) { CircularProgressIndicator(Modifier.size(18.dp), color = p.onGreen, strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)) }; Text(if (loading) "Planning your next steps…" else "Create task plan") }
             if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)

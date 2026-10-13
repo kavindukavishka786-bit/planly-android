@@ -13,6 +13,7 @@ class MainActivity : ComponentActivity() {
     private var openedTask by mutableStateOf<String?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppDiagnostics.install(applicationContext)
         enableEdgeToEdge()
         openedTask = intent.getStringExtra("taskId")
         Reminders.channels(this)

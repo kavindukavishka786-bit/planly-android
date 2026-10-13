@@ -3,6 +3,7 @@ package com.planly.app
 import java.time.*
 import java.util.UUID
 import java.time.temporal.ChronoUnit
+import java.net.URI
 
 data class ChecklistItem(val id: String = UUID.randomUUID().toString(), val title: String, val done: Boolean = false)
 data class FocusSession(val id: String = UUID.randomUUID().toString(), val task: String, val minutes: Int, val finishedAt: Long)
@@ -28,7 +29,7 @@ data class Preferences(
     val theme: String = "Light", val glass: Boolean = true, val name: String = "",
     val reminders: Boolean = false, val quietHours: Boolean = false,
     val quietStart: Int = 22 * 60, val quietEnd: Int = 7 * 60,
-    val aiEnabled: Boolean = false, val endpoint: String = ""
+    val aiEnabled: Boolean = false, val endpoint: String = "", val screenBreaks: Boolean = false, val reduceMotion: Boolean = false
 )
 data class AppData(val tasks: List<Task> = emptyList(), val preferences: Preferences = Preferences(),
     val focusEnd: Long = 0, val focusRemaining: Long = 25 * 60, val focusTask: String = "",
@@ -44,10 +45,24 @@ object FocusRules {
 }
 
 object AiRules {
+    fun validEndpoint(value: String): Boolean {
+        val uri = runCatching { URI(value.trim()) }.getOrNull() ?: return false
+        return uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null &&
+            (uri.path.isNullOrBlank() || uri.path == "/")
+    }
     fun validateToken(token: String): String? = when {
         token.length !in 32..512 -> "Use a random server access token of 32 to 512 characters. Set the same token on your server."
         token.any { it.code !in 33..126 } -> "Use an access token without spaces or line breaks."
         else -> null
+    }
+}
+
+object BreakRules {
+    const val HOUR = 60 * 60_000L
+    fun nextAt(stored: Long, now: Long, prefs: Preferences, zone: ZoneId = ZoneId.systemDefault()): Long? {
+        if (!prefs.screenBreaks) return null
+        val next = if (stored > now) stored else now + HOUR
+        return TaskRules.afterQuietHours(next, prefs, zone)
     }
 }
 
