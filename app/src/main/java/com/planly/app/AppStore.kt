@@ -101,6 +101,7 @@ class AppStore private constructor(private val context: Application) {
     @Synchronized fun preferences(p: Preferences) {
         val old = mutable.value.preferences
         save(mutable.value.copy(preferences = p))
+        if (p.screenBreaks && (old.quietHours != p.quietHours || old.quietStart != p.quietStart || old.quietEnd != p.quietEnd)) ScreenBreaks.rebase(context)
         if (old.reminders != p.reminders || old.screenBreaks != p.screenBreaks || old.quietHours != p.quietHours || old.quietStart != p.quietStart || old.quietEnd != p.quietEnd) reschedule()
     }
     @Synchronized fun reschedule(force: Boolean = false): Int {

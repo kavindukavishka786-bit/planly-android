@@ -19,6 +19,10 @@ object ScreenBreaks {
     private fun prefs(context: Context) = context.getSharedPreferences("planly_breaks", Context.MODE_PRIVATE)
     fun nextAt(context: Context) = prefs(context).getLong("nextAt", 0)
     @Synchronized fun resetCache() { scheduledAt = 0 }
+    @Synchronized fun rebase(context: Context) {
+        prefs(context).edit().putLong("nextAt", System.currentTimeMillis() + BreakRules.HOUR).apply()
+        scheduledAt = 0
+    }
     private fun pending(context: Context, action: String = "BREAK_REMIND", flags: Int = PendingIntent.FLAG_UPDATE_CURRENT): PendingIntent? =
         PendingIntent.getBroadcast(context, 0, Intent(context, ScreenBreakReceiver::class.java).setAction(action)
             .setData(Uri.parse("planly://screen-break/$action")), flags or PendingIntent.FLAG_IMMUTABLE)

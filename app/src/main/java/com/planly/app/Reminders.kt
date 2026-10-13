@@ -115,6 +115,9 @@ class RescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val allowed = setOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_MY_PACKAGE_REPLACED, "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED")
-        if (intent.action in allowed) AppStore.get(context).reschedule(force = true)
+        if (intent.action in allowed) {
+            if (intent.action == Intent.ACTION_TIME_CHANGED || intent.action == Intent.ACTION_TIMEZONE_CHANGED) ScreenBreaks.rebase(context)
+            AppStore.get(context).reschedule(force = true)
+        }
     }
 }
