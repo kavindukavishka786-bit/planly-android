@@ -17,7 +17,7 @@ def tree():
 
 def tap(label):
     for attempt in range(4):
-        nodes = [n for n in tree().iter('node') if n.get('text') == label or n.get('content-desc') == label]
+        nodes = [n for n in tree().iter('node') if n.get('text', '').startswith(label) or n.get('content-desc') == label]
         if nodes:
             node = max(nodes, key=lambda n: int(re.findall(r'\d+', n.get('bounds'))[1]))
             left, top, right, bottom = map(int, re.findall(r'\d+', node.get('bounds')))
